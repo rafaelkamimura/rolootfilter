@@ -1,0 +1,71 @@
+# RO LATAM loot filter — Path-of-Exile style: rules are evaluated top to bottom,
+# the first matching rule decides (unless it sets `continue = true`).
+#
+# Match keys : ids = [1000636, "1000640-1000643"], resource = "regex", name_match = "regex",
+#              description = "regex", effect = 1870, min_id / max_id
+# Actions    : size = 4, glow = "auto" | "#ff8800" | "none", hide = true, effect_id = 1870
+# `effect_id` rewrites iteminfo_new.lub (same mechanism as Aether Dust's glow); it only shows in-game
+# when the server flags that drop, so `glow` (a halo baked into the sprite) is the reliable part.
+#
+# LATAM content state (checked 2026-10-14): Ep 17.2 + Ep 18 + Ecosfera de Varmundt + Éden 130-190.
+# Ep 19/20/21 materials exist in the client table but are not obtainable yet; add them when they launch.
+
+[settings]
+client = 'C:\Gravity\Ragnarok'
+glow_alpha = 200        # halo peak opacity 0-255
+glow_scale = 1.9        # halo diameter relative to the enlarged sprite
+patch_iteminfo = true   # allow effect_id rules to rewrite System\iteminfo_new.lub (pristine copy kept in cache/)
+
+# ---- Ecosfera de Varmundt: runes (bl_grass / bl_lava / bl_ice / bl_death) ----
+[[rule]]
+name = "Barmund rune fragments"
+ids = ["1000636-1000639"]
+size = 4
+glow = "auto"
+effect_id = 1870
+
+[[rule]]
+name = "Barmund runes"
+ids = ["1000640-1000643"]
+size = 4
+glow = "auto"
+effect_id = 1870
+
+# ---- Ep 17.2: Aether (Éter) family: dust, stone, gems, blessed dust, ores ----
+[[rule]]
+name = "Aether family"
+resource = "^(HD_|Blessed_)?Etel_"
+size = 4
+glow = "auto"
+
+# ---- Ep 18: Grey Wolf village materials ----
+[[rule]]
+name = "Ep18 amethyst fragment"
+ids = [1000405]
+size = 4
+glow = "auto"
+
+[[rule]]
+name = "Ep18 quest pickups (Cristal Solido, Flor Bicolor)"
+ids = [1000406, 1000407]
+size = 3
+glow = "auto"
+
+# ---- LATAM-only exchange materials (RUF-10 at glast_01 -> Tiara Temporal) ----
+[[rule]]
+name = "Lagrima Temporal"
+resource = "^(Hot|Ice)_Water_Drop_Gem$"
+size = 4
+glow = "auto"
+
+# ---- Examples (commented out) ----
+# [[rule]]
+# name = "Hide jellopy"
+# ids = [909]
+# hide = true
+#
+# [[rule]]
+# name = "Everything the server already highlights"
+# effect = 1870
+# size = 3
+# glow = "#ffffff"

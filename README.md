@@ -1,3 +1,5 @@
+**English** · **[Português (BR)](README.pt-BR.md)**
+
 # RO Loot Filter
 
 A Path-of-Exile-style loot filter for **Ragnarok Online LATAM**, done entirely on the client side.

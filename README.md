@@ -1,94 +1,159 @@
-# rolootfilter
+# RO Loot Filter
 
-A Path-of-Exile-style loot filter for Ragnarok Online LATAM, implemented purely client-side.
+A Path-of-Exile-style loot filter for **Ragnarok Online LATAM**, done entirely on the client side.
+It makes the drops you care about big and glowing and makes vendor trash invisible, by rewriting
+the ground-drop sprites inside `data.grf` according to rules you control.
 
-RO's client cannot be told to hide or recolor drops, but it draws every ground drop from a
-sprite inside `data.grf`. This tool rewrites those sprites according to rules in `filter.toml`:
+![icon](assets/rolf.png)
 
-| action      | what the client shows                                              |
-|-------------|--------------------------------------------------------------------|
-| `size = N`  | pixel-doubled drop sprite, N times bigger                          |
-| `glow`      | a colored halo layer behind the sprite (`auto` picks the item hue) |
-| `hide`      | 1x1 transparent sprite, the drop is effectively invisible          |
-| `effect_id` | sets the item's `EffectID` in `iteminfo_new.lub` (Aether Dust's 1870 drop effect) — only visible when the server flags the drop |
+| action        | what you see in game                                                      |
+|---------------|---------------------------------------------------------------------------|
+| `size = 4`    | the drop sprite pixel-doubled 4x (any factor 1-6)                         |
+| `glow`        | a colored halo behind the drop; `auto` picks the item's own hue           |
+| `hide`        | a 1x1 transparent sprite, the drop is effectively invisible on the ground |
+| `effect_id`   | sets the item's `EffectID` in `iteminfo_new.lub` (the server-flagged drop effect Aether Dust has) |
 
-## GUI
+Everything is reversible with one click, and the tool re-baselines itself after official patches.
 
-`RO Loot Filter.bat` (or `python rolfgui.py`) opens the manager: rule list with ordering and
-enable toggles on the left, the rule editor in the middle with a live before/after sprite preview
-and the list of items the rule matches, an item search on the right (the `+` button adds an id to
-the current rule), and Apply / Dry run / Revert with the engine log at the bottom. Save writes
-`filter.toml` (comments in the file are not preserved by the GUI).
+---
 
-## Standalone exe (for sharing)
+## For players: the exe
 
-`build.ps1` produces `dist\RO Loot Filter.exe` (PyInstaller, single file, ~20 MB, no Python needed).
-Hand that one file to guild members. On first run it:
+1. Download `RO Loot Filter.exe` from the [latest release](../../releases/latest).
+2. **Close the game.** Apply and Revert refuse to run while `Ragexe.exe` is open.
+3. Run the exe. Windows SmartScreen may warn about an unknown publisher; choose *More info →
+   Run anyway*. (It is an unsigned single-file PyInstaller build; nothing is installed.)
+4. Check the **Client folder** at the top. `C:\Gravity\Ragnarok` is detected automatically;
+   otherwise click *Browse…* and pick the folder that contains `data.grf`.
+5. Press **APPLY**. The first run takes about a minute: it snapshots your untouched `data.grf`,
+   reads the item table, builds the sprites and writes them. The log at the bottom shows progress
+   and ends with `verify: N/N files read back identical`.
+6. Start the game. Runes, Éter materials and the other highlighted items are now large and glowing;
+   Jellopy and friends are gone from the ground.
 
-* looks for `filter.toml` next to the exe (so you can ship a tuned filter alongside it), otherwise
-  creates `%LOCALAPPDATA%\RoLootFilter\filter.toml` from the bundled default;
-* keeps its GRF snapshot, pristine iteminfo and extracted originals in `%LOCALAPPDATA%\RoLootFilter\cache`;
-* auto-detects `C:\Gravity\Ragnarok`; any other install path is set with the Browse button.
+**Revert** restores the original `data.grf` and `iteminfo_new.lub` exactly. Do this before
+reporting any client bug to support, and whenever you want the stock look back.
 
-Apply and Revert refuse to run while `Ragexe.exe` is open. Expect SmartScreen / some antivirus to
-be suspicious of an unsigned single-file PyInstaller exe; that is normal for this packaging.
+### Editing rules in the GUI
 
-## CLI
+* **Rules** (left): evaluated top to bottom, the first matching rule decides. Reorder with ▲▼,
+  select one to edit it, `+ new` adds one.
+* **Rule** (middle): match by item IDs (`909, 1000636-1000643`), a regex on the resource name,
+  the pt-BR display name or the description, or by an existing EffectID. Set size, glow, hide,
+  "continue to later rules", and whether the rule is enabled. Press **Update rule** to store it.
+  The list under *Matches* shows exactly which items the rule currently catches.
+* **Preview** (right): before/after render of the selected item. Search items by name, resource
+  or id; the `+` button adds that id to the current rule.
+* **Save** writes `filter.toml`; **Dry run** shows the plan without touching the client.
+
+### Where things live
+
+| | |
+|---|---|
+| your rules       | `filter.toml` next to the exe if present, else `%LOCALAPPDATA%\RoLootFilter\filter.toml` |
+| snapshots/cache  | `%LOCALAPPDATA%\RoLootFilter\cache` (pristine GRF header, pristine iteminfo, extracted originals) |
+| previews         | `%LOCALAPPDATA%\RoLootFilter\preview\*.png` |
+
+Shipping a `filter.toml` next to the exe is the easy way to give your guild a shared, tuned filter.
+
+### After an official patch
+
+The patcher rewrites `data.grf`, which drops the modifications. Just open the tool and press
+**APPLY** again; it notices the file changed, takes a fresh snapshot and re-applies the rules.
+
+---
+
+## For developers: running from source
+
+Requirements: Python 3.11+ (3.14 tested), Windows.
 
 ```
-python rolf.py apply            # evaluate filter.toml, patch data.grf (+ iteminfo), write preview/*.png
-python rolf.py apply --dry      # show the plan only
-python rolf.py revert           # restore pristine data.grf and iteminfo_new.lub
+pip install lupa customtkinter pillow      # lupa = Lua 5.1 VM used to execute iteminfo_new.lub
+python rolfgui.py                           # the GUI
+python rolf.py apply [filter.toml] [--dry] [--no-preview]
+python rolf.py revert
 python rolf.py status
-python rolf.py search "Éter"    # find item ids / resource names to write rules against
+python rolf.py search "Éter|Runa"           # find ids / resource names to write rules against
 ```
 
-Close the game client before `apply` or `revert`.
+Running from source keeps state in `cache/` and `preview/` inside the project (both gitignored).
 
-## How it stays safe
+### Building the exe
 
-* First run snapshots the pristine GRF (header + size) in `cache/state.json`. Patching is
-  append-only: new sprite blobs and a rebuilt file table go after the old end of file and the
-  8-byte table pointer in the header is repointed. `revert` = restore header + truncate.
-* Every `apply` first reverts to pristine, so rule edits never stack.
-* If the official patcher rewrites `data.grf`, the old snapshot no longer validates and the new
-  file becomes the baseline automatically. Just run `apply` again after a patch.
-* `iteminfo_new.lub` is rebuilt from a pristine copy (`cache/iteminfo_new.lub.pristine`) and
-  round-trip verified before it is installed.
+```
+pip install pyinstaller
+.\build.ps1                                  # -> dist\RO Loot Filter.exe
+```
 
-## Rule reference
+### Rule file reference
 
 ```toml
+[settings]
+client = 'C:\Gravity\Ragnarok'
+glow_alpha = 200          # halo peak opacity 0-255
+glow_scale = 1.9          # halo diameter relative to the enlarged sprite
+patch_iteminfo = true     # allow effect_id rules to rewrite System\iteminfo_new.lub
+
 [[rule]]
-name = "label"
-ids = [1000405, "1000636-1000643"]   # any of: ids, resource, name_match, description, effect, min_id, max_id
-resource = "^Etel_"                   # regex on identifiedResourceName
-name_match = "Runa"                   # regex on identifiedDisplayName (pt-BR)
-description = "Varmunt"               # regex on the description text
-effect = 1870                         # item already has this EffectID
-size = 4
-glow = "auto"                         # or "#rrggbb" or "none"
-hide = false
+name = "Barmund rune fragments"
+ids = ["1000636-1000639"]           # ints or "a-b" ranges
+size = 6
+glow = "auto"                       # "auto" | "#rrggbb" | "none"
 effect_id = 1870
-continue = false                      # true = keep evaluating later rules (PoE Continue)
-unidentified = false                  # also patch the unidentified sprite (shared by many equips, careful)
+
+[[rule]]
+name = "Aether family"
+resource = "^(HD_|Blessed_)?Etel_"  # regex on identifiedResourceName
+size = 4
+glow = "auto"
+
+[[rule]]
+name = "Hide vendor trash"
+ids = [909, 914, 705, 916, 938]
+hide = true
+
+# other match keys: name_match (pt-BR display name regex), description (regex),
+#                   effect (item already has this EffectID), min_id, max_id
+# other actions:    continue = true (keep evaluating), unidentified = true (also patch the
+#                   unidentified sprite; shared by many equips, use with care), enabled = false
 ```
 
-## Requirements
+Rules with several match keys require all of them to match. A rule with no match keys is an error.
 
-Python 3.11+ and `pip install lupa customtkinter pillow` (lupa bundles the Lua 5.1 VM used to execute
-the lub; customtkinter + pillow are for the GUI). `pycryptodome` is optional and only used by the
-cipher self-test.
+### How it works
 
-## Internals worth knowing
-
-* `data.grf` is GRF 0x300 ("Event Horizon" signature, 64-bit offsets, table in the middle of the file).
-* Item sprites live in `data\sprite\아이템\` (CP949; shows as `¾ÆÀÌÅÛ` in Latin-1 tools). Resource
-  names are lowercase inside the GRF.
-* Classic entries are encrypted (flag 3 = mixed, flag 5 = header only). Gravity's cipher is a single
+* `data.grf` is GRF **0x300** ("Event Horizon" signature, 64-bit offsets, file table in the
+  middle of the archive). Patching is append-only: new sprite blobs and a rebuilt table are written
+  after the old end of file and the 8-byte table pointer in the header is repointed. Revert is
+  "restore the 46-byte header and truncate". Nothing pre-existing is ever overwritten.
+* Classic entries are encrypted (flag 3 mixed, flag 5 header-only). Gravity's cipher is a single
   keyless DES round (IP, L ^= F(R), FP) on the first 20 blocks, then one block every `cycle` blocks
-  plus a byte shuffle on every 7th remaining block; see `rolfcore/grfdes.py` and `grf.py`.
-* `iteminfo_new.lub` is 32-bit Lua 5.1 bytecode with UTF-8 strings; it only defines `tbl`.
-  `iteminfo_f.lub` holds `main()`, which calls `AddItemEffectInfo(id, EffectID)`.
-* SPR v2.1 (RLE palette frames + ABGR frames), ACT v2.5 (layers: x, y, sprIndex, mirror, color,
-  scaleX, scaleY, rot, sprType, w, h). The halo is an extra ABGR frame drawn as layer 0.
+  plus a byte shuffle on every 7th remaining block. See `rolfcore/grfdes.py` and `grf.py`.
+* Item sprites are `data\sprite\아이템\<resource>.spr/.act` (CP949 folder name, which shows as
+  `¾ÆÀÌÅÛ` in Latin-1 tools; names are lowercase inside the GRF). SPR v2.1 (RLE palette frames,
+  ABGR frames) and ACT 2.0-2.5 (always written back as 2.5). The halo is an extra ABGR frame
+  inserted as layer 0.
+* `iteminfo_new.lub` is 32-bit Lua 5.1 bytecode with UTF-8 strings that only defines `tbl`.
+  It is executed by transcoding `size_t` 4→8 and running it in lupa's Lua 5.1 VM with every
+  global stubbed; rebuilt with `string.dump` and transcoded back, then round-trip verified before
+  install. `iteminfo_f.lub` holds `main()`, which calls `AddItemEffectInfo(id, EffectID)`.
+* `EffectID 1870` is what gives Aether Dust its drop glow. The server decides per drop whether the
+  effect plays, so `effect_id` is best-effort; the baked halo is the part that always shows.
+
+### Layout
+
+```
+rolf.py            CLI
+rolfgui.py         GUI (customtkinter)
+rolfcore/engine.py apply / revert / status, snapshot logic
+rolfcore/grf.py    GRF 0x300 reader + append writer      rolfcore/grfdes.py  Gravity cipher
+rolfcore/sprite.py SPR/ACT parsing, transforms, renderer  rolfcore/iteminfo.py lub load/rebuild
+rolfcore/rules.py  rule matching                          rolfcore/tomlout.py  filter writer
+filter.toml        the rules                              build.ps1            exe build
+```
+
+## Status
+
+Tested on RO LATAM (client of 2026-10-01, Episode 18 + Ecosfera de Varmundt content). The
+included filter highlights the Varmunt runes, the Éter family, Episode 18 materials and the
+Lágrima Temporal exchange items, and hides 28 vendor-trash drops.

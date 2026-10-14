@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import customtkinter as ctk
 from tkinter import filedialog
 from PIL import Image
-from rolfcore import engine, iteminfo, sprite, rules as rulesmod, tomlout
+from rolfcore import engine, iteminfo, sprite, rules as rulesmod, tomlout, __version__
 from rolfcore import grf as grfmod
 
 FROZEN = engine.FROZEN; HERE = engine.HERE
@@ -66,7 +66,7 @@ class ItemSource:
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title('RO Loot Filter'); self.geometry('1380x900'); self.minsize(1100, 720); self.configure(fg_color=BG0)
+        self.title('RO Loot Filter v' + __version__); self.geometry('1380x900'); self.minsize(1100, 720); self.configure(fg_color=BG0)
         ico = os.path.join(BUNDLE, 'assets', 'rolf.ico')
         if os.path.exists(ico):
             try: self.iconbitmap(ico)
@@ -91,7 +91,7 @@ class App(ctk.CTk):
         self._log('saved %s' % FILTER); self._set_title()
 
     def _set_title(self):
-        self.title('RO Loot Filter' + (' •' if self.dirty else ''))
+        self.title('RO Loot Filter v' + __version__ + (' •' if self.dirty else ''))
 
     def _load_items_async(self):
         def work():
@@ -109,7 +109,8 @@ class App(ctk.CTk):
         self.grid_columnconfigure(0, weight=0); self.grid_columnconfigure(1, weight=1); self.grid_columnconfigure(2, weight=0)
         self.grid_rowconfigure(2, weight=1)
         top = ctk.CTkFrame(self, fg_color=BG1, corner_radius=0, height=56); top.grid(row=0, column=0, columnspan=3, sticky='ew')
-        ctk.CTkLabel(top, text='RO LOOT FILTER', font=('Segoe UI', 20, 'bold'), text_color=ACCENT).pack(side='left', padx=18, pady=12)
+        ctk.CTkLabel(top, text='RO LOOT FILTER', font=('Segoe UI', 20, 'bold'), text_color=ACCENT).pack(side='left', padx=(18, 6), pady=12)
+        ctk.CTkLabel(top, text='v' + __version__, text_color=FG_DIM, font=('Consolas', 11)).pack(side='left', padx=(0, 12))
         self.status_lbl = ctk.CTkLabel(top, text='', text_color=FG_DIM, font=('Consolas', 12)); self.status_lbl.pack(side='left', padx=10)
         for txt, cmd, col in (('Revert', lambda: self._run('revert'), BG2), ('Dry run', lambda: self._run('dry'), BG2), ('APPLY', lambda: self._run('apply'), ACCENT)):
             ctk.CTkButton(top, text=txt, width=96, command=cmd, fg_color=col, hover_color=ACCENT_DIM if col == ACCENT else '#2f343c',

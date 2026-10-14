@@ -20,6 +20,19 @@ and the list of items the rule matches, an item search on the right (the `+` but
 the current rule), and Apply / Dry run / Revert with the engine log at the bottom. Save writes
 `filter.toml` (comments in the file are not preserved by the GUI).
 
+## Standalone exe (for sharing)
+
+`build.ps1` produces `dist\RO Loot Filter.exe` (PyInstaller, single file, ~20 MB, no Python needed).
+Hand that one file to guild members. On first run it:
+
+* looks for `filter.toml` next to the exe (so you can ship a tuned filter alongside it), otherwise
+  creates `%LOCALAPPDATA%\RoLootFilter\filter.toml` from the bundled default;
+* keeps its GRF snapshot, pristine iteminfo and extracted originals in `%LOCALAPPDATA%\RoLootFilter\cache`;
+* auto-detects `C:\Gravity\Ragnarok`; any other install path is set with the Browse button.
+
+Apply and Revert refuse to run while `Ragexe.exe` is open. Expect SmartScreen / some antivirus to
+be suspicious of an unsigned single-file PyInstaller exe; that is normal for this packaging.
+
 ## CLI
 
 ```

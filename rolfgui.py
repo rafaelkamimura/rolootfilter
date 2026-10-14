@@ -1,38 +1,57 @@
-"""RO Loot Filter — desktop manager (customtkinter).
+"""RO Loot Filter — desktop manager (customtkinter). Works from source and as a PyInstaller exe.
 
   python rolfgui.py [filter.toml]
 """
-import os, sys, re, threading, subprocess, tomllib, queue
+import os, sys, re, threading, tomllib, queue, shutil
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import customtkinter as ctk
+from tkinter import filedialog
 from PIL import Image
 from rolfcore import engine, iteminfo, sprite, rules as rulesmod, tomlout
 from rolfcore import grf as grfmod
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-FILTER = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, 'filter.toml')
+FROZEN = engine.FROZEN; HERE = engine.HERE
+BUNDLE = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 ACCENT = '#f0a830'; ACCENT_DIM = '#8a5f1a'; BG0 = '#121417'; BG1 = '#1a1d22'; BG2 = '#23272e'; FG_DIM = '#8b93a1'
 GLOW_SWATCH = {'auto': '#9bd', 'none': '#555'}
+DEFAULT_CLIENTS = [r'C:\Gravity\Ragnarok', r'C:\Program Files (x86)\Gravity\Ragnarok', r'D:\Gravity\Ragnarok']
 
 ctk.set_appearance_mode('dark'); ctk.set_default_color_theme('dark-blue')
+
+
+def resolve_filter():
+    """filter.toml next to the exe/script, else in AppData, else a copy of the bundled default."""
+    if len(sys.argv) > 1 and sys.argv[1].lower().endswith('.toml'): return os.path.abspath(sys.argv[1])
+    local = os.path.join(HERE, 'filter.toml')
+    if os.path.exists(local) and os.access(HERE, os.W_OK): return local
+    os.makedirs(engine.DATA_DIR, exist_ok=True); appdata = os.path.join(engine.DATA_DIR, 'filter.toml')
+    if not os.path.exists(appdata):
+        src = local if os.path.exists(local) else os.path.join(BUNDLE, 'filter.toml')
+        if os.path.exists(src): shutil.copyfile(src, appdata)
+        else: open(appdata, 'w', encoding='utf-8').write(tomlout.dumps({'client': DEFAULT_CLIENTS[0]}, []))
+    return appdata
+
+
+FILTER = resolve_filter()
 
 
 class ItemSource:
     """Reads original sprites (cache/orig first, then the GRF) and renders previews."""
     def __init__(self, settings):
-        self.settings = settings; self.g = None
-        self.orig = os.path.join(engine.CACHE, 'orig')
+        self.settings = settings; self.g = None; self.orig = os.path.join(engine.CACHE, 'orig')
 
     def grf(self):
         if self.g is None: self.g = grfmod.Grf(os.path.join(self.settings['client'], 'data.grf'))
         return self.g
 
+    def close(self):
+        if self.g: self.g.close(); self.g = None
+
     def original(self, rn, ext):
         p = os.path.join(self.orig, rn + ext)
         if os.path.exists(p): return open(p, 'rb').read()
         g = self.grf(); key = g.item_path(rn, ext)
-        if not g.has(key): return None
-        return g.read(key)
+        return g.read(key) if g.has(key) else None
 
     def render(self, rn, action=None, settings=None):
         spr = self.original(rn, '.spr'); act = self.original(rn, '.act')
@@ -47,17 +66,24 @@ class ItemSource:
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title('RO Loot Filter'); self.geometry('1380x860'); self.minsize(1100, 700); self.configure(fg_color=BG0)
-        self.settings, self.rules = self._load(); self.sel = None; self.dirty = False
-        self.src = ItemSource(self.settings); self.tbl = None; self.q = queue.Queue(); self.proc = None
+        self.title('RO Loot Filter'); self.geometry('1380x900'); self.minsize(1100, 720); self.configure(fg_color=BG0)
+        ico = os.path.join(BUNDLE, 'assets', 'rolf.ico')
+        if os.path.exists(ico):
+            try: self.iconbitmap(ico)
+            except Exception: pass
+        self.settings, self.rules = self._load(); self.sel = None; self.dirty = False; self._loading = False
+        self.src = ItemSource(self.settings); self.tbl = None; self.q = queue.Queue(); self.busy = False
         self._build(); self._refresh_rules(); self.after(100, self._load_items_async); self.after(200, self._pump)
         self.protocol('WM_DELETE_WINDOW', self._close)
 
     # ---------- data ----------
     def _load(self):
         cfg = tomllib.load(open(FILTER, 'rb'))
-        s = cfg.get('settings', {}); s.setdefault('client', r'C:\Gravity\Ragnarok'); s.setdefault('glow_alpha', 200)
-        s.setdefault('glow_scale', 1.9); s.setdefault('patch_iteminfo', True)
+        s = cfg.get('settings', {}); s.setdefault('glow_alpha', 200); s.setdefault('glow_scale', 1.9); s.setdefault('patch_iteminfo', True)
+        if not s.get('client') or not os.path.exists(os.path.join(s.get('client', ''), 'data.grf')):
+            for c in DEFAULT_CLIENTS:
+                if os.path.exists(os.path.join(c, 'data.grf')): s['client'] = c; break
+            else: s.setdefault('client', DEFAULT_CLIENTS[0])
         return s, [dict(r) for r in cfg.get('rule', [])]
 
     def _save(self):
@@ -69,10 +95,11 @@ class App(ctk.CTk):
 
     def _load_items_async(self):
         def work():
-            live, pristine = engine._lub_paths(self.settings); src = pristine if os.path.exists(pristine) else live
             try:
-                tbl = iteminfo.load_cached(src, os.path.join(engine.CACHE, 'iteminfo.json'))
-                self.q.put(('tbl', tbl))
+                live, pristine = engine._lub_paths(self.settings); src = pristine if os.path.exists(pristine) else live
+                if not os.path.exists(src): self.q.put(('log', 'iteminfo_new.lub not found under %s' % self.settings['client'])); return
+                os.makedirs(engine.CACHE, exist_ok=True)
+                self.q.put(('tbl', iteminfo.load_cached(src, os.path.join(engine.CACHE, 'iteminfo.json'))))
             except Exception as ex:
                 self.q.put(('log', 'iteminfo load failed: %s' % ex))
         threading.Thread(target=work, daemon=True).start()
@@ -80,33 +107,34 @@ class App(ctk.CTk):
     # ---------- layout ----------
     def _build(self):
         self.grid_columnconfigure(0, weight=0); self.grid_columnconfigure(1, weight=1); self.grid_columnconfigure(2, weight=0)
-        self.grid_rowconfigure(1, weight=1)
-        # top bar
+        self.grid_rowconfigure(2, weight=1)
         top = ctk.CTkFrame(self, fg_color=BG1, corner_radius=0, height=56); top.grid(row=0, column=0, columnspan=3, sticky='ew')
         ctk.CTkLabel(top, text='RO LOOT FILTER', font=('Segoe UI', 20, 'bold'), text_color=ACCENT).pack(side='left', padx=18, pady=12)
         self.status_lbl = ctk.CTkLabel(top, text='', text_color=FG_DIM, font=('Consolas', 12)); self.status_lbl.pack(side='left', padx=10)
-        for txt, cmd, col in (('Revert', lambda: self._run('revert'), BG2), ('Dry run', lambda: self._run('apply', '--dry'), BG2),
-                              ('APPLY', lambda: self._run('apply'), ACCENT)):
-            b = ctk.CTkButton(top, text=txt, width=96, command=cmd, fg_color=col, hover_color=ACCENT_DIM if col == ACCENT else '#2f343c',
-                              text_color='#111' if col == ACCENT else '#ddd', font=('Segoe UI', 13, 'bold' if col == ACCENT else 'normal'))
-            b.pack(side='right', padx=6, pady=10)
+        for txt, cmd, col in (('Revert', lambda: self._run('revert'), BG2), ('Dry run', lambda: self._run('dry'), BG2), ('APPLY', lambda: self._run('apply'), ACCENT)):
+            ctk.CTkButton(top, text=txt, width=96, command=cmd, fg_color=col, hover_color=ACCENT_DIM if col == ACCENT else '#2f343c',
+                          text_color='#111' if col == ACCENT else '#ddd', font=('Segoe UI', 13, 'bold' if col == ACCENT else 'normal')).pack(side='right', padx=6, pady=10)
         ctk.CTkButton(top, text='Save', width=80, command=self._save, fg_color=BG2, hover_color='#2f343c').pack(side='right', padx=6)
+        # client folder row
+        crow = ctk.CTkFrame(self, fg_color=BG0, corner_radius=0); crow.grid(row=1, column=0, columnspan=3, sticky='ew', padx=12, pady=(8, 0))
+        ctk.CTkLabel(crow, text='Client folder', text_color=FG_DIM).pack(side='left', padx=(6, 8))
+        self.client_entry = ctk.CTkEntry(crow, fg_color=BG2, border_width=0, width=420); self.client_entry.pack(side='left')
+        self.client_entry.insert(0, self.settings['client']); self.client_entry.bind('<Return>', lambda _e: self._set_client(self.client_entry.get()))
+        ctk.CTkButton(crow, text='Browse…', width=90, fg_color=BG2, hover_color='#2f343c', command=self._browse_client).pack(side='left', padx=8)
+        ctk.CTkLabel(crow, text='filter: ' + FILTER, text_color=FG_DIM, font=('Consolas', 11)).pack(side='right', padx=6)
 
-        # left: rule list
-        left = ctk.CTkFrame(self, fg_color=BG1, corner_radius=12, width=330); left.grid(row=1, column=0, sticky='nsw', padx=(12, 6), pady=10)
+        left = ctk.CTkFrame(self, fg_color=BG1, corner_radius=12, width=330); left.grid(row=2, column=0, sticky='nsw', padx=(12, 6), pady=10)
         left.grid_propagate(False); left.grid_rowconfigure(1, weight=1); left.grid_columnconfigure(0, weight=1)
         hdr = ctk.CTkFrame(left, fg_color='transparent'); hdr.grid(row=0, column=0, sticky='ew', padx=10, pady=(10, 4))
         ctk.CTkLabel(hdr, text='RULES', font=('Segoe UI', 13, 'bold'), text_color=FG_DIM).pack(side='left')
         ctk.CTkButton(hdr, text='+ new', width=64, height=26, command=self._add_rule, fg_color=BG2, hover_color='#2f343c').pack(side='right')
         self.rule_list = ctk.CTkScrollableFrame(left, fg_color='transparent'); self.rule_list.grid(row=1, column=0, sticky='nsew', padx=4)
         self.rule_list.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(left, text='first match wins · drag order with ▲▼', text_color=FG_DIM, font=('Segoe UI', 11)).grid(row=2, column=0, pady=(2, 8))
+        ctk.CTkLabel(left, text='first match wins · reorder with ▲▼', text_color=FG_DIM, font=('Segoe UI', 11)).grid(row=2, column=0, pady=(2, 8))
 
-        # centre: editor
-        mid = ctk.CTkFrame(self, fg_color=BG1, corner_radius=12); mid.grid(row=1, column=1, sticky='nsew', padx=6, pady=10)
+        mid = ctk.CTkFrame(self, fg_color=BG1, corner_radius=12); mid.grid(row=2, column=1, sticky='nsew', padx=6, pady=10)
         mid.grid_columnconfigure(1, weight=1); mid.grid_rowconfigure(20, weight=1)
-        self.ed = {}
-        r = 0
+        self.ed = {}; r = 0
         ctk.CTkLabel(mid, text='RULE', font=('Segoe UI', 13, 'bold'), text_color=FG_DIM).grid(row=r, column=0, sticky='w', padx=14, pady=(12, 2)); r += 1
         self._field(mid, r, 'name', 'Name'); r += 1
         ctk.CTkLabel(mid, text='MATCH  (all given criteria must match)', font=('Segoe UI', 12, 'bold'), text_color=FG_DIM).grid(row=r, column=0, columnspan=2, sticky='w', padx=14, pady=(14, 2)); r += 1
@@ -132,7 +160,6 @@ class App(ctk.CTk):
         self.ed['glow_mode'].pack(side='left', padx=8)
         self.ed['glow_color'] = ctk.CTkEntry(grow, width=90, placeholder_text='#ff8800', fg_color=BG2, border_width=0); self.ed['glow_color'].pack(side='left')
         self.ed['glow_color'].bind('<KeyRelease>', lambda _e: (self._mark(), self._preview()))
-        self.swatch = ctk.CTkLabel(grow, text='   ', width=26, height=26, corner_radius=6, fg_color='#555'); self.swatch.pack(side='left', padx=8)
         for pair in ((('hide', 'Hide (invisible drop)'), ('continue', 'Continue to later rules')), (('unidentified', 'Also patch unidentified sprite'), ('enabled', 'Rule enabled'))):
             trow = ctk.CTkFrame(mid, fg_color='transparent'); trow.grid(row=r, column=0, columnspan=2, sticky='ew', padx=14, pady=3); r += 1
             for key, lab in pair:
@@ -145,29 +172,35 @@ class App(ctk.CTk):
         ctk.CTkButton(brow, text='Delete', command=self._delete_rule, fg_color='#5a2a2a', hover_color='#7a3a3a', width=80).pack(side='left', padx=8)
         self.match_lbl = ctk.CTkLabel(brow, text='', text_color=FG_DIM); self.match_lbl.pack(side='right')
         ctk.CTkLabel(mid, text='MATCHES', font=('Segoe UI', 12, 'bold'), text_color=FG_DIM).grid(row=r, column=0, columnspan=2, sticky='w', padx=14, pady=(12, 2)); r += 1
-        self.match_box = ctk.CTkTextbox(mid, fg_color=BG2, font=('Consolas', 12), height=150, activate_scrollbars=True)
-        self.match_box.grid(row=20, column=0, columnspan=2, sticky='nsew', padx=14, pady=(0, 12))
+        self.match_box = ctk.CTkTextbox(mid, fg_color=BG2, font=('Consolas', 12), height=150); self.match_box.grid(row=20, column=0, columnspan=2, sticky='nsew', padx=14, pady=(0, 12))
 
-        # right: item browser + preview
-        right = ctk.CTkFrame(self, fg_color=BG1, corner_radius=12, width=360); right.grid(row=1, column=2, sticky='nse', padx=(6, 12), pady=10)
+        right = ctk.CTkFrame(self, fg_color=BG1, corner_radius=12, width=360); right.grid(row=2, column=2, sticky='nse', padx=(6, 12), pady=10)
         right.grid_propagate(False); right.grid_columnconfigure(0, weight=1); right.grid_rowconfigure(3, weight=1)
         ctk.CTkLabel(right, text='PREVIEW', font=('Segoe UI', 13, 'bold'), text_color=FG_DIM).grid(row=0, column=0, sticky='w', padx=14, pady=(10, 2))
-        self.prev_frame = ctk.CTkFrame(right, fg_color='#263020', corner_radius=10, height=230); self.prev_frame.grid(row=1, column=0, sticky='ew', padx=12)
-        self.prev_frame.grid_propagate(False)
+        self.prev_frame = ctk.CTkFrame(right, fg_color='#263020', corner_radius=10, height=230); self.prev_frame.grid(row=1, column=0, sticky='ew', padx=12); self.prev_frame.grid_propagate(False)
         self.prev_img = ctk.CTkLabel(self.prev_frame, text='select an item', text_color=FG_DIM); self.prev_img.place(relx=.5, rely=.5, anchor='center')
         self.prev_cap = ctk.CTkLabel(right, text='', text_color=FG_DIM, font=('Consolas', 11)); self.prev_cap.grid(row=2, column=0, sticky='w', padx=14)
         srch = ctk.CTkFrame(right, fg_color='transparent'); srch.grid(row=3, column=0, sticky='nsew', padx=12, pady=(8, 10)); srch.grid_rowconfigure(1, weight=1); srch.grid_columnconfigure(0, weight=1)
-        self.search = ctk.CTkEntry(srch, placeholder_text='search items: name, resource or id', fg_color=BG2, border_width=0); self.search.grid(row=0, column=0, sticky='ew')
+        self.search = ctk.CTkEntry(srch, placeholder_text='search items: name, resource or id  (Enter)', fg_color=BG2, border_width=0); self.search.grid(row=0, column=0, sticky='ew')
         self.search.bind('<Return>', lambda _e: self._do_search())
         self.results = ctk.CTkScrollableFrame(srch, fg_color='transparent'); self.results.grid(row=1, column=0, sticky='nsew', pady=(6, 0)); self.results.grid_columnconfigure(0, weight=1)
-
-        # bottom: log
-        self.log = ctk.CTkTextbox(self, fg_color=BG1, font=('Consolas', 11), height=150); self.log.grid(row=2, column=0, columnspan=3, sticky='ew', padx=12, pady=(0, 12))
+        self.log = ctk.CTkTextbox(self, fg_color=BG1, font=('Consolas', 11), height=150); self.log.grid(row=3, column=0, columnspan=3, sticky='ew', padx=12, pady=(0, 12))
 
     def _field(self, parent, r, key, label, ph=''):
         ctk.CTkLabel(parent, text=label, text_color=FG_DIM, anchor='w', width=130).grid(row=r, column=0, sticky='w', padx=14, pady=3)
         e = ctk.CTkEntry(parent, placeholder_text=ph, fg_color=BG2, border_width=0); e.grid(row=r, column=1, sticky='ew', padx=(0, 14), pady=3)
         e.bind('<KeyRelease>', lambda _e: self._mark()); self.ed[key] = e
+
+    # ---------- client folder ----------
+    def _browse_client(self):
+        d = filedialog.askdirectory(title='Select the Ragnarok client folder (contains data.grf)', initialdir=self.settings['client'])
+        if d: self.client_entry.delete(0, 'end'); self.client_entry.insert(0, os.path.normpath(d)); self._set_client(d)
+
+    def _set_client(self, path):
+        path = os.path.normpath(path.strip())
+        if not os.path.exists(os.path.join(path, 'data.grf')): self._log('no data.grf in %s' % path); return
+        self.settings['client'] = path; self.src.close(); self.src = ItemSource(self.settings); self.tbl = None
+        self._mark(); self._save(); self._log('client folder: %s' % path); self._load_items_async()
 
     # ---------- rules list ----------
     def _refresh_rules(self):
@@ -179,9 +212,8 @@ class App(ctk.CTk):
             dot = ACCENT if r.get('hide') else GLOW_SWATCH.get(r.get('glow') or 'none', r.get('glow') or '#555')
             ctk.CTkLabel(row, text='■', text_color=dot if on else '#444', width=18).grid(row=0, column=0, padx=(6, 0))
             desc = ('HIDE' if r.get('hide') else 'x%s %s' % (r.get('size', 1), r.get('glow') or '')) + ('  ·  off' if not on else '')
-            b = ctk.CTkButton(row, text='%s\n%s' % (r.get('name', 'rule'), desc), anchor='w', fg_color='transparent', hover_color='#2f343c',
-                              text_color='#eee' if on else '#777', command=lambda i=i: self._select(i), font=('Segoe UI', 12))
-            b.grid(row=0, column=1, sticky='ew')
+            ctk.CTkButton(row, text='%s\n%s' % (r.get('name', 'rule'), desc), anchor='w', fg_color='transparent', hover_color='#2f343c',
+                          text_color='#eee' if on else '#777', command=lambda i=i: self._select(i), font=('Segoe UI', 12)).grid(row=0, column=1, sticky='ew')
             ctk.CTkButton(row, text='▲', width=24, height=22, fg_color='transparent', hover_color='#2f343c', command=lambda i=i: self._move(i, -1)).grid(row=0, column=2)
             ctk.CTkButton(row, text='▼', width=24, height=22, fg_color='transparent', hover_color='#2f343c', command=lambda i=i: self._move(i, 1)).grid(row=0, column=3, padx=(0, 4))
 
@@ -198,13 +230,13 @@ class App(ctk.CTk):
         for k in ('hide', 'continue', 'unidentified'):
             (self.ed[k].select if r.get(k) else self.ed[k].deselect)()
         (self.ed['enabled'].select if r.get('enabled', True) else self.ed['enabled'].deselect)()
-        self._loading = False; self._update_matches(); self._preview()
+        self._loading = False; self.prev_rn = None; self._update_matches()
 
     def _size_changed(self, v):
         self.size_lbl.configure(text='x%d' % int(float(v))); self._mark(); self._preview()
 
     def _mark(self):
-        if getattr(self, '_loading', False): return
+        if self._loading: return
         self.dirty = True; self._set_title()
 
     def _read_editor(self):
@@ -264,13 +296,11 @@ class App(ctk.CTk):
         try: rd = self._read_editor()
         except Exception as ex: self.match_lbl.configure(text=str(ex)); return
         rule = rulesmod.Rule(rd, 0); rule.enabled = True
-        hits = [(i, e) for i, e in self.tbl.items() if rule.matches(i, e)]
-        self.match_lbl.configure(text='%d item(s) match' % len(hits))
-        self.match_box.delete('1.0', 'end')
-        for i, e in sorted(hits)[:200]:
+        hits = sorted((i, e) for i, e in self.tbl.items() if rule.matches(i, e))
+        self.match_lbl.configure(text='%d item(s) match' % len(hits)); self.match_box.delete('1.0', 'end')
+        for i, e in hits[:200]:
             self.match_box.insert('end', '%-8d %-34s %s\n' % (i, e.get('identifiedDisplayName', '')[:34], e.get('identifiedResourceName', '')))
         if len(hits) > 200: self.match_box.insert('end', '... %d more\n' % (len(hits) - 200))
-        self.match_hits = hits
         if hits and not getattr(self, 'prev_rn', None): self._show_item(hits[0][0])
 
     def _show_item(self, iid):
@@ -279,25 +309,21 @@ class App(ctk.CTk):
 
     def _preview(self):
         rn = getattr(self, 'prev_rn', None)
-        if not rn: return
+        if not rn or self.busy: return
+        action = self._current_action()
         def work():
-            try:
-                before = self.src.render(rn); after = self.src.render(rn, self._current_action(), self.settings)
-                self.q.put(('preview', (rn, before, after)))
-            except Exception as ex:
-                self.q.put(('log', 'preview failed for %s: %s' % (rn, ex)))
+            try: self.q.put(('preview', (rn, self.src.render(rn), self.src.render(rn, action, self.settings))))
+            except Exception as ex: self.q.put(('log', 'preview failed for %s: %s' % (rn, ex)))
         threading.Thread(target=work, daemon=True).start()
 
     def _set_preview(self, rn, before, after):
-        if before is None or after is None:
-            self.prev_img.configure(image=None, text='no sprite for %s' % rn); return
+        if before is None or after is None: self.prev_img.configure(image=None, text='no sprite for %s' % rn); return
         gap = 16; scale = min(1.0, 210.0 / max(after.height, 1), 320.0 / max(before.width + after.width + gap, 1))
         b = before.resize((max(1, int(before.width * scale)), max(1, int(before.height * scale))), Image.NEAREST)
         a = after.resize((max(1, int(after.width * scale)), max(1, int(after.height * scale))), Image.NEAREST)
         W = b.width + a.width + gap; H = max(b.height, a.height)
         canvas = Image.new('RGB', (W, H), (38, 48, 32)); canvas.paste(b, (0, (H - b.height) // 2)); canvas.paste(a, (b.width + gap, (H - a.height) // 2))
-        self._ctkimg = ctk.CTkImage(light_image=canvas, dark_image=canvas, size=(W, H))
-        self.prev_img.configure(image=self._ctkimg, text='')
+        self._ctkimg = ctk.CTkImage(light_image=canvas, dark_image=canvas, size=(W, H)); self.prev_img.configure(image=self._ctkimg, text='')
         e = self.tbl.get(getattr(self, 'prev_iid', 0), {})
         self.prev_cap.configure(text='%s  %s   before %dx%d -> after %dx%d' % (getattr(self, 'prev_iid', ''), e.get('identifiedDisplayName', rn)[:26], before.width, before.height, after.width, after.height))
 
@@ -306,11 +332,9 @@ class App(ctk.CTk):
         q = self.search.get().strip()
         for w in self.results.winfo_children(): w.destroy()
         if not q: return
-        rx = re.compile(re.escape(q), re.I); hits = []
-        for i, e in self.tbl.items():
-            if (q.isdigit() and i == int(q)) or rx.search(e.get('identifiedDisplayName', '')) or rx.search(e.get('identifiedResourceName', '')):
-                hits.append((i, e))
-        for n, (i, e) in enumerate(sorted(hits)[:80]):
+        rx = re.compile(re.escape(q), re.I)
+        hits = sorted((i, e) for i, e in self.tbl.items() if (q.isdigit() and i == int(q)) or rx.search(e.get('identifiedDisplayName', '')) or rx.search(e.get('identifiedResourceName', '')))
+        for n, (i, e) in enumerate(hits[:80]):
             row = ctk.CTkFrame(self.results, fg_color='transparent'); row.grid(row=n, column=0, sticky='ew'); row.grid_columnconfigure(0, weight=1)
             ctk.CTkButton(row, text='%d  %s' % (i, e.get('identifiedDisplayName', '')[:30]), anchor='w', fg_color='transparent', hover_color='#2f343c',
                           font=('Segoe UI', 11), command=lambda i=i: self._show_item(i)).grid(row=0, column=0, sticky='ew')
@@ -322,25 +346,28 @@ class App(ctk.CTk):
         cur = self.ed['ids'].get().strip()
         self.ed['ids'].delete(0, 'end'); self.ed['ids'].insert(0, (cur + ', ' if cur else '') + str(iid)); self._mark(); self._update_matches()
 
-    # ---------- engine ----------
-    def _run(self, *args):
-        if self.proc is not None: self._log('busy'); return
+    # ---------- engine (in-process, background thread) ----------
+    def _run(self, what):
+        if self.busy: self._log('busy'); return
         if self.dirty: self._save()
-        cmd = [sys.executable, os.path.join(HERE, 'rolf.py'), *args, FILTER]
-        self._log('> ' + ' '.join(args))
+        self.busy = True; self.src.close(); self._log('> ' + what)
         def work():
-            env = dict(os.environ, PYTHONIOENCODING='utf-8')
-            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', env=env, cwd=HERE)
-            for line in self.proc.stdout: self.q.put(('log', line.rstrip()))
-            self.proc.wait(); self.q.put(('log', '[exit %d]' % self.proc.returncode)); self.proc = None; self.q.put(('status', None))
+            engine.LOG = lambda s: self.q.put(('log', s))
+            try:
+                if what == 'revert': engine.revert(FILTER)
+                else: engine.apply(FILTER, dry=(what == 'dry'), preview=True)
+                self.q.put(('log', '[done]'))
+            except SystemExit as ex: self.q.put(('log', '[aborted] %s' % ex))
+            except Exception as ex: self.q.put(('log', '[error] %r' % ex))
+            finally:
+                engine.LOG = print; self.q.put(('done', None))
         threading.Thread(target=work, daemon=True).start()
 
     def _status(self):
         def work():
             try:
-                out = subprocess.run([sys.executable, os.path.join(HERE, 'rolf.py'), 'status', FILTER], capture_output=True, text=True, encoding='utf-8', errors='replace', cwd=HERE).stdout
-                grf = re.search(r'GRF state\s*:\s*(.+)', out); lub = re.search(r'iteminfo\s*:\s*(.+)', out)
-                self.q.put(('statusline', 'GRF %s · iteminfo %s' % (grf.group(1).strip() if grf else '?', lub.group(1).strip() if lub else '?')))
+                i = engine.status_info(FILTER)
+                self.q.put(('statusline', 'GRF %s · iteminfo %s%s' % (i['grf'], i['iteminfo'], ' · GAME RUNNING' if i['running'] else '')))
             except Exception as ex: self.q.put(('log', 'status failed: %s' % ex))
         threading.Thread(target=work, daemon=True).start()
 
@@ -357,7 +384,7 @@ class App(ctk.CTk):
                     if self.sel is None and self.rules: self._select(0)
                     else: self._update_matches()
                 elif kind == 'preview': self._set_preview(*payload)
-                elif kind == 'status': self._status()
+                elif kind == 'done': self.busy = False; self._status(); self._preview()
                 elif kind == 'statusline': self.status_lbl.configure(text=payload)
         except queue.Empty:
             pass
@@ -365,8 +392,7 @@ class App(ctk.CTk):
 
     def _close(self):
         if self.dirty: self._save()
-        if self.src.g: self.src.g.close()
-        self.destroy()
+        self.src.close(); self.destroy()
 
 
 if __name__ == '__main__':

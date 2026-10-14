@@ -10,7 +10,7 @@ patch_iteminfo = true
 
 [[rule]]
 name = "Barmund rune fragments"
-ids = ["1000636-1000643"]
+ids = ["1000636-1000639"]
 size = 6
 glow = "auto"
 effect_id = 1870

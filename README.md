@@ -12,7 +12,15 @@ sprite inside `data.grf`. This tool rewrites those sprites according to rules in
 | `hide`      | 1x1 transparent sprite, the drop is effectively invisible          |
 | `effect_id` | sets the item's `EffectID` in `iteminfo_new.lub` (Aether Dust's 1870 drop effect) — only visible when the server flags the drop |
 
-## Usage
+## GUI
+
+`RO Loot Filter.bat` (or `python rolfgui.py`) opens the manager: rule list with ordering and
+enable toggles on the left, the rule editor in the middle with a live before/after sprite preview
+and the list of items the rule matches, an item search on the right (the `+` button adds an id to
+the current rule), and Apply / Dry run / Revert with the engine log at the bottom. Save writes
+`filter.toml` (comments in the file are not preserved by the GUI).
+
+## CLI
 
 ```
 python rolf.py apply            # evaluate filter.toml, patch data.grf (+ iteminfo), write preview/*.png
@@ -55,13 +63,18 @@ unidentified = false                  # also patch the unidentified sprite (shar
 
 ## Requirements
 
-Python 3.11+ and `pip install lupa` (bundled Lua 5.1 VM used to execute the lub).
+Python 3.11+ and `pip install lupa customtkinter pillow` (lupa bundles the Lua 5.1 VM used to execute
+the lub; customtkinter + pillow are for the GUI). `pycryptodome` is optional and only used by the
+cipher self-test.
 
 ## Internals worth knowing
 
 * `data.grf` is GRF 0x300 ("Event Horizon" signature, 64-bit offsets, table in the middle of the file).
 * Item sprites live in `data\sprite\아이템\` (CP949; shows as `¾ÆÀÌÅÛ` in Latin-1 tools). Resource
   names are lowercase inside the GRF.
+* Classic entries are encrypted (flag 3 = mixed, flag 5 = header only). Gravity's cipher is a single
+  keyless DES round (IP, L ^= F(R), FP) on the first 20 blocks, then one block every `cycle` blocks
+  plus a byte shuffle on every 7th remaining block; see `rolfcore/grfdes.py` and `grf.py`.
 * `iteminfo_new.lub` is 32-bit Lua 5.1 bytecode with UTF-8 strings; it only defines `tbl`.
   `iteminfo_f.lub` holds `main()`, which calls `AddItemEffectInfo(id, EffectID)`.
 * SPR v2.1 (RLE palette frames + ABGR frames), ACT v2.5 (layers: x, y, sprIndex, mirror, color,

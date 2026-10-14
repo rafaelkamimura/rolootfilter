@@ -9,6 +9,42 @@ import struct, zlib, os
 HEADER_LEN = 46
 ITEM_FOLDER = ('data/sprite/아이템/'.replace('/', chr(92))).encode('cp949')
 
+# ---------------- Gravity's GRF encryption (flags 2 = mixed, 4 = header-only) ----------------
+# Blocks use a single keyless DES round (rAthena des.c), implemented in grfdes.py.
+_SUBST = {0x00: 0x2B, 0x2B: 0x00, 0x6C: 0x80, 0x01: 0x68, 0x68: 0x01, 0x48: 0x77, 0x60: 0xFF,
+          0x77: 0x48, 0xB9: 0xC0, 0xC0: 0xB9, 0xFE: 0xEB, 0xEB: 0xFE, 0x80: 0x6C, 0xFF: 0x60}
+
+
+class _des:
+    @staticmethod
+    def decrypt(block):
+        from .grfdes import gravity_decrypt_block
+        return gravity_decrypt_block(block)
+
+
+def _shuffle_dec(b):
+    return bytes((b[3], b[4], b[6], b[0], b[1], b[2], b[5], _SUBST.get(b[7], b[7])))
+
+
+def grf_decode_header(buf):
+    d = _des; out = bytearray(buf); n = min(20, len(buf) // 8)
+    for i in range(n): out[i * 8:i * 8 + 8] = d.decrypt(bytes(buf[i * 8:i * 8 + 8]))
+    return bytes(out)
+
+
+def grf_decode_full(buf, compressed_len):
+    digits = len(str(compressed_len))
+    cycle = 1 if digits < 3 else digits + 1 if digits < 5 else digits + 9 if digits < 7 else digits + 15
+    d = _des; out = bytearray(buf); nblocks = len(buf) // 8
+    for i in range(min(20, nblocks)): out[i * 8:i * 8 + 8] = d.decrypt(bytes(buf[i * 8:i * 8 + 8]))
+    j = -1
+    for i in range(20, nblocks):
+        blk = bytes(buf[i * 8:i * 8 + 8])
+        if i % cycle == 0: out[i * 8:i * 8 + 8] = d.decrypt(blk); continue
+        j += 1
+        if j % 7 == 0 and j != 0: out[i * 8:i * 8 + 8] = _shuffle_dec(blk)
+    return bytes(out)
+
 
 class Grf:
     def __init__(self, path):
@@ -44,8 +80,11 @@ class Grf:
 
     def read(self, key):
         e = self.index[key]; name, c, ca, r, fl, off = e
-        if fl != 1: raise ValueError('entry %r uses encryption flag %d; not supported' % (name, fl))
-        self.f.seek(off + HEADER_LEN); raw = zlib.decompress(self.f.read(c))
+        if not fl & 1: raise ValueError('entry %r is not a file (flag %d)' % (name, fl))
+        self.f.seek(off + HEADER_LEN); buf = self.f.read(ca)
+        if fl & 2: buf = grf_decode_full(buf, c)
+        elif fl & 4: buf = grf_decode_header(buf)
+        raw = zlib.decompress(buf[:c])
         if len(raw) != r: raise ValueError('bad size for %r' % name)
         return raw
 

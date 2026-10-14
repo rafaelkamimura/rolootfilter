@@ -33,6 +33,7 @@ def _ids(spec):
 class Rule:
     def __init__(self, d, n):
         self.name = d.get('name', 'rule %d' % n); self.d = d
+        self.enabled = bool(d.get('enabled', True))
         self.ids = _ids(d.get('ids')) if 'ids' in d else None
         self.resource = re.compile(d['resource'], re.I) if 'resource' in d else None
         self.dname = re.compile(d['name_match'], re.I) if 'name_match' in d else None
@@ -45,6 +46,7 @@ class Rule:
             raise ValueError('rule %r has no match criteria' % self.name)
 
     def matches(self, iid, e):
+        if not self.enabled: return False
         if self.ids is not None and iid not in self.ids: return False
         if self.min_id is not None and iid < self.min_id: return False
         if self.max_id is not None and iid > self.max_id: return False

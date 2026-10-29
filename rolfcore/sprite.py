@@ -157,7 +157,9 @@ def transform(spr, act, size=1, glow=None, glow_alpha=200, glow_scale=1.9, hide=
     glow_index = None
     if glow and glow != 'none' and big_pal:
         w0 = max(w for w, h, _ in big_pal); h0 = max(h for w, h, _ in big_pal)
-        gw = int(w0 * glow_scale) | 1; gh = int(h0 * glow_scale) | 1
+        # ground drops are drawn tilted onto the terrain, so a tall halo reads as a huge pool behind the item
+        # (or gets clipped below the floor): grow it sideways, but cap its height close to the item's own
+        gw = int(w0 * glow_scale) | 1; gh = int(h0 * min(glow_scale, 1.3)) | 1
         color = dominant_color(pal, palette) if glow == 'auto' else hex_color(glow)
         big_rgba.append((gw, gh, make_glow(gw, gh, color, glow_alpha))); glow_index = len(big_rgba) - 1
         info['glow'] = (gw, gh, color)
@@ -171,8 +173,8 @@ def transform(spr, act, size=1, glow=None, glow_alpha=200, glow_scale=1.9, hide=
                 new.append(l)
             if glow_index is not None and new:
                 b = new[0]; gw, gh = big_rgba[glow_index][:2]
-                # lift the halo so its bottom edge meets the item's bottom edge: ground drops sit on the
-                # terrain plane and anything drawn below it is clipped by the depth test (a cut-off disc)
+                # bottom edge of the halo meets the item's bottom edge: anything below the item's base
+                # goes under the terrain plane and is clipped by the depth test (a cut-off disc)
                 lift = max(0, (gh - b[10]) // 2)
                 new.insert(0, [b[0], b[1] - lift, glow_index, 0, 0xFFFFFFFF, 1.0, 1.0, 0, 1, gw, gh])
             fr['layers'] = new

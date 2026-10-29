@@ -170,8 +170,11 @@ def transform(spr, act, size=1, glow=None, glow_alpha=200, glow_scale=1.9, hide=
                 elif l[8] == 1 and 0 <= l[2] < len(big_rgba): l[9], l[10] = big_rgba[l[2]][:2]
                 new.append(l)
             if glow_index is not None and new:
-                b = new[0]
-                new.insert(0, [b[0], b[1], glow_index, 0, 0xFFFFFFFF, 1.0, 1.0, 0, 1, big_rgba[glow_index][0], big_rgba[glow_index][1]])
+                b = new[0]; gw, gh = big_rgba[glow_index][:2]
+                # lift the halo so its bottom edge meets the item's bottom edge: ground drops sit on the
+                # terrain plane and anything drawn below it is clipped by the depth test (a cut-off disc)
+                lift = max(0, (gh - b[10]) // 2)
+                new.insert(0, [b[0], b[1] - lift, glow_index, 0, 0xFFFFFFFF, 1.0, 1.0, 0, 1, gw, gh])
             fr['layers'] = new
     return spr_write(big_pal, big_rgba, palette), act_write(a), info
 

@@ -91,13 +91,14 @@ def apply(filter_path, dry=False, preview=True):
     g = grfmod.Grf(os.path.join(settings['client'], 'data.grf'))
     try:
         ensure_pristine(settings, g)
-        files = {}; built = []; missing = []; effect_edits = {}
+        files = {}; built = []; missing = []; effect_edits = {}; preid = []
         orig_dir = os.path.join(CACHE, 'orig'); os.makedirs(orig_dir, exist_ok=True)
         if preview: os.makedirs(PREVIEW, exist_ok=True)
         for iid, act in sorted(actions.items()):
             e = tbl[iid]; names = [e['identifiedResourceName']]
             if act['unidentified'] and e.get('unidentifiedResourceName') not in names: names.append(e['unidentifiedResourceName'])
             if act['effect_id'] is not None: effect_edits[iid] = act['effect_id']
+            if act['preidentify'] and e.get('unidentifiedResourceName') != e['identifiedResourceName']: preid.append(iid)
             for rn in names:
                 ks = g.item_path(rn, '.spr'); ka = g.item_path(rn, '.act')
                 if not (g.has(ks) and g.has(ka)): missing.append((iid, rn)); continue
@@ -114,7 +115,7 @@ def apply(filter_path, dry=False, preview=True):
                     W, H, img = sprite.render(nspr, nact); sprite.png_write(os.path.join(PREVIEW, rn + '.png'), W, H, img)
         for b in built: _p('  %-8d %-36s %-26s %-24s x%d glow=%s%s' % (b[0], b[1][:36], b[2][:26], b[3][:24], b[4], b[5], ' HIDE' if b[6] else ''))
         for m in missing: _p('  skipped %s: %s' % m)
-        _p('%d items -> %d files; %d effect edits; %d skipped' % (len(built), len(files), len(effect_edits), len(missing)))
+        _p('%d items -> %d files; %d effect edits; %d pre-identified; %d skipped' % (len(built), len(files), len(effect_edits), len(preid), len(missing)))
         if dry: _p('dry run, nothing written'); return
         new_size = g.append_files(files) if files else os.path.getsize(g.path)
         st = _state(); st['applied'] = {'size': new_size, 'header': g.header.hex() if False else open(g.path, 'rb').read(46).hex(), 'files': len(files)}
@@ -123,18 +124,22 @@ def apply(filter_path, dry=False, preview=True):
     finally:
         g.close()
     _verify(settings, files)
-    if effect_edits:
+    if effect_edits or preid:
         if not settings['patch_iteminfo']:
-            _p('NOTE: %d effect_id edits ignored (set patch_iteminfo = true in [settings])' % len(effect_edits))
+            _p('NOTE: %d effect_id / %d preidentify edits ignored (set patch_iteminfo = true in [settings])' % (len(effect_edits), len(preid)))
         else:
             for iid, eff in effect_edits.items(): tbl[iid]['EffectID'] = eff
+            for iid in preid:
+                e = tbl[iid]
+                for k in ('ResourceName', 'DisplayName', 'DescriptionName'):
+                    if 'identified' + k in e: e['unidentified' + k] = e['identified' + k]
             lub = iteminfo.compile_lub(tbl); live, _ = _lub_paths(settings)
             tmp = live + '.tmp'; open(tmp, 'wb').write(lub)
             back = iteminfo.load_tbl(tmp)
             if back != tbl: os.remove(tmp); raise SystemExit('iteminfo round-trip mismatch; not installing')
             os.replace(tmp, live)
             st = _state(); st['lub_applied_sha1'] = hashlib.sha1(lub).hexdigest(); _save_state(st)
-            _p('iteminfo_new.lub: installed with %d EffectID edits (%d bytes)' % (len(effect_edits), len(lub)))
+            _p('iteminfo_new.lub: installed with %d EffectID edits, %d items pre-identified (%d bytes)' % (len(effect_edits), len(preid), len(lub)))
 
 
 def _cached(g, orig_dir, fname, key):

@@ -15,6 +15,7 @@ controla.
 | `glow`        | um halo colorido atrás do drop; `auto` usa a cor do próprio item             |
 | `hide`        | sprite transparente de 1x1 px, o drop fica invisível no chão                 |
 | `effect_id`   | grava o `EffectID` do item no `iteminfo_new.lub` (o efeito de drop que o Pó de Éter tem, controlado pelo servidor) |
+| `preidentify` | copia sprite e nome identificados por cima dos não identificados no `iteminfo_new.lub`, assim um equipamento dropado sem identificar mostra o próprio sprite em vez do genérico da classe |
 
 Tudo é reversível com um clique, e a ferramenta se recalibra sozinha depois de patches oficiais.
 
@@ -120,7 +121,8 @@ hide = true
 #                         effect (o item já tem esse EffectID), min_id, max_id
 # outras ações:           continue = true (segue avaliando), unidentified = true (também altera o
 #                         sprite não identificado; é compartilhado por muitos equips, use com cuidado),
-#                         enabled = false
+#                         enabled = false, preidentify = true (drops não identificados desses itens
+#                         aparecem com sprite e nome identificados; só mexe no iteminfo, exige patch_iteminfo)
 ```
 
 Uma regra com várias chaves de match exige que todas casem. Regra sem nenhuma chave de match é erro.

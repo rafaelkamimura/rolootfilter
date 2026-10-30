@@ -14,6 +14,8 @@ Actions:
   hide   true -> replace the ground sprite with a 1x1 transparent frame
   continue  true -> keep evaluating later rules (PoE "Continue")
   unidentified  true -> also patch unidentifiedResourceName when it differs (equipment drops)
+  preidentify   true -> copy the identified sprite/name/description over the unidentified fields in iteminfo,
+                        so an unidentified ground drop shows the item's own sprite (needs patch_iteminfo)
 """
 import re
 
@@ -41,7 +43,7 @@ class Rule:
         self.effect = d.get('effect'); self.min_id = d.get('min_id'); self.max_id = d.get('max_id')
         self.size = int(d.get('size', 1)); self.glow = d.get('glow'); self.hide = bool(d.get('hide', False))
         self.effect_id = d.get('effect_id'); self.cont = bool(d.get('continue', False))
-        self.unidentified = bool(d.get('unidentified', False))
+        self.unidentified = bool(d.get('unidentified', False)); self.preidentify = bool(d.get('preidentify', False))
         if 'name' in d and not any(k in d for k in ('ids', 'resource', 'name_match', 'description', 'effect', 'min_id', 'max_id')):
             raise ValueError('rule %r has no match criteria' % self.name)
 
@@ -57,7 +59,7 @@ class Rule:
         return True
 
     def is_noop(self):
-        return self.size <= 1 and not self.glow and not self.hide and self.effect_id is None
+        return self.size <= 1 and not self.glow and not self.hide and self.effect_id is None and not self.preidentify
 
 
 def evaluate(rules, tbl):
@@ -67,13 +69,14 @@ def evaluate(rules, tbl):
         act = None
         for r in rules:
             if not r.matches(iid, e): continue
-            if act is None: act = {'rule': r, 'size': 1, 'glow': None, 'hide': False, 'effect_id': None, 'unidentified': False}
+            if act is None: act = {'rule': r, 'size': 1, 'glow': None, 'hide': False, 'effect_id': None, 'unidentified': False, 'preidentify': False}
             if r.size > 1: act['size'] = max(act['size'], r.size)
             if r.glow: act['glow'] = r.glow
             if r.hide: act['hide'] = True
             if r.effect_id is not None: act['effect_id'] = r.effect_id
             if r.unidentified: act['unidentified'] = True
+            if r.preidentify: act['preidentify'] = True
             if not r.cont: break
-        if act and not (act['size'] <= 1 and not act['glow'] and not act['hide'] and act['effect_id'] is None):
+        if act and not (act['size'] <= 1 and not act['glow'] and not act['hide'] and act['effect_id'] is None and not act['preidentify']):
             out[iid] = act
     return out

@@ -14,6 +14,7 @@ the ground-drop sprites inside `data.grf` according to rules you control.
 | `glow`        | a colored halo behind the drop; `auto` picks the item's own hue           |
 | `hide`        | a 1x1 transparent sprite, the drop is effectively invisible on the ground |
 | `effect_id`   | sets the item's `EffectID` in `iteminfo_new.lub` (the server-flagged drop effect Aether Dust has) |
+| `preidentify` | copies the identified sprite/name over the unidentified ones in `iteminfo_new.lub`, so an unidentified equipment drop shows its own sprite instead of the generic class one |
 
 Everything is reversible with one click, and the tool re-baselines itself after official patches.
 
@@ -117,7 +118,9 @@ hide = true
 # other match keys: name_match (pt-BR display name regex), description (regex),
 #                   effect (item already has this EffectID), min_id, max_id
 # other actions:    continue = true (keep evaluating), unidentified = true (also patch the
-#                   unidentified sprite; shared by many equips, use with care), enabled = false
+#                   unidentified sprite; shared by many equips, use with care), enabled = false,
+#                   preidentify = true (unidentified drops of these items render with the identified
+#                   sprite and name; iteminfo-only, needs patch_iteminfo)
 ```
 
 Rules with several match keys require all of them to match. A rule with no match keys is an error.

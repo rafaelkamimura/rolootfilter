@@ -2,11 +2,11 @@
 
 HEADER = """# RO LATAM loot filter — rules are evaluated top to bottom, first match wins (unless `continue = true`).
 # Match keys : ids, resource, name_match, description, effect, min_id, max_id
-# Actions    : size, glow ("auto" | "#rrggbb" | "none"), hide, effect_id, continue, unidentified, enabled
+# Actions    : size, glow ("auto" | "#rrggbb" | "none"), hide, effect_id, preidentify, continue, unidentified, enabled
 """
 
 RULE_KEYS = ['name', 'enabled', 'ids', 'resource', 'name_match', 'description', 'effect', 'min_id', 'max_id',
-             'size', 'glow', 'hide', 'effect_id', 'continue', 'unidentified']
+             'size', 'glow', 'hide', 'effect_id', 'preidentify', 'continue', 'unidentified']
 
 
 def _val(v):

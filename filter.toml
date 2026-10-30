@@ -47,10 +47,46 @@ size = 4
 glow = "auto"
 
 [[rule]]
-name = "Ep19 Issgard quest drops (dailies, MD bosses, Ninho da Serpente)"
-ids = [1000608, 1000707, 1000822, 1000830, 1000824, 1000829, 7326, "1000811-1000814", 1000833, 1000834, "1001029-1001032"]
+name = "Ep19 Dim Glacier weapons (Vil Invernal), shown identified on the ground"
+resource = "^D_Glacier_"
 size = 6
 glow = "auto"
+preidentify = true
+
+[[rule]]
+name = "Cards (one sprite shared by every card in the game)"
+resource = "^이름없는카드$"
+size = 6
+glow = "auto"
+
+[[rule]]
+name = "Ep19 enchant mats, tier 4: Globo Reluzente, Cristal Magico Purificado"
+ids = [1000814, 1001032]
+size = 6
+glow = "auto"
+
+[[rule]]
+name = "Ep19 enchant mats, tier 3: Cristal Magico Corrompido"
+ids = [1001031]
+size = 5
+glow = "auto"
+
+[[rule]]
+name = "Ep19 enchant mats, tier 2: Globo Brilhante, Pedra da Fonte Purificada"
+ids = [1000813, 1001030]
+size = 4
+glow = "auto"
+
+[[rule]]
+name = "Ep19 enchant mats, tier 1: Minerio, Globo, Pedra da Fonte Corrompida"
+ids = [1000811, 1000812, 1001029]
+size = 3
+glow = "auto"
+
+[[rule]]
+name = "Ep19 enchant mats, tier 0: Petala de Flor Invernal (common currency)"
+ids = [1000608]
+size = 2
 
 [[rule]]
 name = "Hide vendor trash"

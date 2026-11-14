@@ -79,7 +79,7 @@ class App(ctk.CTk):
     # ---------- data ----------
     def _load(self):
         cfg = tomllib.load(open(FILTER, 'rb'))
-        s = cfg.get('settings', {}); s.setdefault('glow_alpha', 200); s.setdefault('glow_scale', 1.9); s.setdefault('patch_iteminfo', True)
+        s = cfg.get('settings', {}); s.setdefault('glow_alpha', 200); s.setdefault('glow_scale', 1.9); s.setdefault('patch_iteminfo', False)
         if not s.get('client') or not os.path.exists(os.path.join(s.get('client', ''), 'data.grf')):
             for c in DEFAULT_CLIENTS:
                 if os.path.exists(os.path.join(c, 'data.grf')): s['client'] = c; break
@@ -161,8 +161,7 @@ class App(ctk.CTk):
         self.ed['glow_mode'].pack(side='left', padx=8)
         self.ed['glow_color'] = ctk.CTkEntry(grow, width=90, placeholder_text='#ff8800', fg_color=BG2, border_width=0); self.ed['glow_color'].pack(side='left')
         self.ed['glow_color'].bind('<KeyRelease>', lambda _e: (self._mark(), self._preview()))
-        for pair in ((('hide', 'Hide (invisible drop)'), ('continue', 'Continue to later rules')), (('unidentified', 'Also patch unidentified sprite'), ('enabled', 'Rule enabled')),
-                     (('preidentify', 'Show unidentified drops as identified (iteminfo)'),)):
+        for pair in ((('hide', 'Hide (invisible drop)'), ('continue', 'Continue to later rules')), (('unidentified', 'Also patch unidentified sprite'), ('enabled', 'Rule enabled'))):
             trow = ctk.CTkFrame(mid, fg_color='transparent'); trow.grid(row=r, column=0, columnspan=2, sticky='ew', padx=14, pady=3); r += 1
             for key, lab in pair:
                 sw = ctk.CTkSwitch(trow, text=lab, width=250, command=lambda: (self._mark(), self._preview()), progress_color=ACCENT); sw.pack(side='left', padx=(0, 16)); self.ed[key] = sw
@@ -229,7 +228,7 @@ class App(ctk.CTk):
         if not g or g == 'none': self.ed['glow_mode'].set('none')
         elif g == 'auto': self.ed['glow_mode'].set('auto')
         else: self.ed['glow_mode'].set('color'); self.ed['glow_color'].insert(0, g)
-        for k in ('hide', 'continue', 'unidentified', 'preidentify'):
+        for k in ('hide', 'continue', 'unidentified'):
             (self.ed[k].select if r.get(k) else self.ed[k].deselect)()
         (self.ed['enabled'].select if r.get('enabled', True) else self.ed['enabled'].deselect)()
         self._loading = False; self.prev_rn = None; self._update_matches()
@@ -261,7 +260,7 @@ class App(ctk.CTk):
             c = self.ed['glow_color'].get().strip()
             if not re.fullmatch(r'#?[0-9a-fA-F]{6}', c): raise ValueError('glow color must be #rrggbb')
             r['glow'] = '#' + c.lstrip('#')
-        for k in ('hide', 'continue', 'unidentified', 'preidentify'):
+        for k in ('hide', 'continue', 'unidentified'):
             if self.ed[k].get(): r[k] = True
         if not self.ed['enabled'].get(): r['enabled'] = False
         return r

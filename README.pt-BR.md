@@ -15,7 +15,6 @@ controla.
 | `glow`        | um halo colorido atrás do drop; `auto` usa a cor do próprio item             |
 | `hide`        | sprite transparente de 1x1 px, o drop fica invisível no chão                 |
 | `effect_id`   | grava o `EffectID` do item no `iteminfo_new.lub` (o efeito de drop que o Pó de Éter tem, controlado pelo servidor) |
-| `preidentify` | copia sprite e nome identificados por cima dos não identificados no `iteminfo_new.lub`, assim um equipamento dropado sem identificar mostra o próprio sprite em vez do genérico da classe |
 
 Tudo é reversível com um clique, e a ferramenta se recalibra sozinha depois de patches oficiais.
 
@@ -121,8 +120,7 @@ hide = true
 #                         effect (o item já tem esse EffectID), min_id, max_id
 # outras ações:           continue = true (segue avaliando), unidentified = true (também altera o
 #                         sprite não identificado; é compartilhado por muitos equips, use com cuidado),
-#                         enabled = false, preidentify = true (drops não identificados desses itens
-#                         aparecem com sprite e nome identificados; só mexe no iteminfo, exige patch_iteminfo)
+#                         enabled = false
 ```
 
 Uma regra com várias chaves de match exige que todas casem. Regra sem nenhuma chave de match é erro.
@@ -167,3 +165,21 @@ filter.toml        as regras                                 build.ps1          
 Testado no RO LATAM (cliente de 01/10/2026, conteúdo do Episódio 18 + Ecosfera de Varmundt). O
 filtro incluído destaca as runas de Varmunt, a família de Éter, materiais do Episódio 18 e as
 Lágrimas Temporais, e esconde 28 drops de lixo de vendor.
+
+
+### Cliente em português: preservar a tabela original
+
+O modo padrão usa `patch_iteminfo = false`: altera o tamanho e o halo dos
+sprites no GRF, sem reconstruir `System\iteminfo_new.lub`. As regras de Éter e
+Barmund usam IDs/recursos internos, compartilhados pelos idiomas.
+
+Se uma aplicação anterior desta ferramenta reescreveu a tabela, o próximo
+**APPLY** restaura a cópia original do cache antes de aplicar os sprites.
+Feche o jogo e a janela antiga do filtro, reabra `python rolfgui.py` e aplique.
+Mantenha a pasta `cache`: ela contém o original necessário para restaurar.
+O efeito adicional `effect_id` fica desativado nesse modo; o halo `glow` e o
+tamanho `size` continuam ativos. Isso não garante resolver qualquer erro do
+GameGuard; confirme iniciando o cliente em português após aplicar.
+
+**Dry run** apenas prepara o plano e previews/cache, sem restaurar nem modificar
+os arquivos do cliente. Para desfazer também os sprites, use **Revert**.

@@ -70,11 +70,36 @@ def ensure_pristine(settings, g):
 def ensure_pristine_lub(settings):
     live, pristine = _lub_paths(settings); st = _state()
     h = hashlib.sha1(open(live, 'rb').read()).hexdigest()
-    if st.get('lub_applied_sha1') == h and os.path.exists(pristine):
+    if st.get('lub_applied_sha1') == h:
+        if not os.path.exists(pristine):
+            raise SystemExit('Original iteminfo backup missing; restore your backup before applying')
         return pristine                     # live file is ours; pristine copy is the real one
     shutil.copyfile(live, pristine)        # live file is Gravity's (fresh or patched) -> snapshot it
     st.pop('lub_applied_sha1', None); _save_state(st)
     return pristine
+
+
+
+def restore_original_iteminfo(settings):
+    """Restore only our own installed table, never overwrite a client update."""
+    st = _state()
+    expected = st.get('lub_applied_sha1')
+    if not expected:
+        return False
+    live, pristine = _lub_paths(settings)
+    with open(live, 'rb') as f:
+        current = hashlib.sha1(f.read()).hexdigest()
+    if current != expected:
+        raise SystemExit('Iteminfo changed externally; restore/check the client before applying')
+    if not os.path.exists(pristine):
+        raise SystemExit('Original iteminfo backup missing; restore your backup before applying')
+    tmp = live + '.tmp'
+    shutil.copyfile(pristine, tmp)
+    os.replace(tmp, live)
+    st.pop('lub_applied_sha1', None)
+    _save_state(st)
+    _p('iteminfo original restaurado; nomes e descricoes do cliente preservados')
+    return True
 
 
 def plan(settings, rules, tbl):
@@ -85,20 +110,30 @@ def apply(filter_path, dry=False, preview=True):
     settings, rules = load_filter(filter_path)
     if _client_running(): raise SystemExit('Ragexe.exe is running; close the client first')
     os.makedirs(CACHE, exist_ok=True)
-    pristine_lub = ensure_pristine_lub(settings)
+    if dry:
+        live, pristine = _lub_paths(settings)
+        with open(live, 'rb') as f:
+            current = hashlib.sha1(f.read()).hexdigest()
+        pristine_lub = pristine if _state().get('lub_applied_sha1') == current else live
+        if not os.path.exists(pristine_lub):
+            raise SystemExit('Original iteminfo backup missing')
+    else:
+        pristine_lub = ensure_pristine_lub(settings)
+        if not settings['patch_iteminfo']:
+            restore_original_iteminfo(settings)
     tbl = iteminfo.load_cached(pristine_lub, os.path.join(CACHE, 'iteminfo.json'))
     actions = plan(settings, rules, tbl)
     g = grfmod.Grf(os.path.join(settings['client'], 'data.grf'))
     try:
-        ensure_pristine(settings, g)
-        files = {}; built = []; missing = []; effect_edits = {}; preid = []
+        if not dry:
+            ensure_pristine(settings, g)
+        files = {}; built = []; missing = []; effect_edits = {}
         orig_dir = os.path.join(CACHE, 'orig'); os.makedirs(orig_dir, exist_ok=True)
         if preview: os.makedirs(PREVIEW, exist_ok=True)
         for iid, act in sorted(actions.items()):
             e = tbl[iid]; names = [e['identifiedResourceName']]
             if act['unidentified'] and e.get('unidentifiedResourceName') not in names: names.append(e['unidentifiedResourceName'])
             if act['effect_id'] is not None: effect_edits[iid] = act['effect_id']
-            if act['preidentify'] and e.get('unidentifiedResourceName') != e['identifiedResourceName']: preid.append(iid)
             for rn in names:
                 ks = g.item_path(rn, '.spr'); ka = g.item_path(rn, '.act')
                 if not (g.has(ks) and g.has(ka)): missing.append((iid, rn)); continue
@@ -115,7 +150,7 @@ def apply(filter_path, dry=False, preview=True):
                     W, H, img = sprite.render(nspr, nact); sprite.png_write(os.path.join(PREVIEW, rn + '.png'), W, H, img)
         for b in built: _p('  %-8d %-36s %-26s %-24s x%d glow=%s%s' % (b[0], b[1][:36], b[2][:26], b[3][:24], b[4], b[5], ' HIDE' if b[6] else ''))
         for m in missing: _p('  skipped %s: %s' % m)
-        _p('%d items -> %d files; %d effect edits; %d pre-identified; %d skipped' % (len(built), len(files), len(effect_edits), len(preid), len(missing)))
+        _p('%d items -> %d files; %d effect edits; %d skipped' % (len(built), len(files), len(effect_edits), len(missing)))
         if dry: _p('dry run, nothing written'); return
         new_size = g.append_files(files) if files else os.path.getsize(g.path)
         st = _state(); st['applied'] = {'size': new_size, 'header': g.header.hex() if False else open(g.path, 'rb').read(46).hex(), 'files': len(files)}
@@ -124,22 +159,18 @@ def apply(filter_path, dry=False, preview=True):
     finally:
         g.close()
     _verify(settings, files)
-    if effect_edits or preid:
+    if effect_edits:
         if not settings['patch_iteminfo']:
-            _p('NOTE: %d effect_id / %d preidentify edits ignored (set patch_iteminfo = true in [settings])' % (len(effect_edits), len(preid)))
+            _p('NOTE: %d effect_id edits ignored (set patch_iteminfo = true in [settings])' % len(effect_edits))
         else:
             for iid, eff in effect_edits.items(): tbl[iid]['EffectID'] = eff
-            for iid in preid:
-                e = tbl[iid]
-                for k in ('ResourceName', 'DisplayName', 'DescriptionName'):
-                    if 'identified' + k in e: e['unidentified' + k] = e['identified' + k]
             lub = iteminfo.compile_lub(tbl); live, _ = _lub_paths(settings)
             tmp = live + '.tmp'; open(tmp, 'wb').write(lub)
             back = iteminfo.load_tbl(tmp)
             if back != tbl: os.remove(tmp); raise SystemExit('iteminfo round-trip mismatch; not installing')
             os.replace(tmp, live)
             st = _state(); st['lub_applied_sha1'] = hashlib.sha1(lub).hexdigest(); _save_state(st)
-            _p('iteminfo_new.lub: installed with %d EffectID edits, %d items pre-identified (%d bytes)' % (len(effect_edits), len(preid), len(lub)))
+            _p('iteminfo_new.lub: installed with %d EffectID edits (%d bytes)' % (len(effect_edits), len(lub)))
 
 
 def _cached(g, orig_dir, fname, key):
